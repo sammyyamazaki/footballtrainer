@@ -67,8 +67,8 @@
         "Porto": "https://upload.wikimedia.org/wikipedia/en/f/f1/FC_Porto.svg",
       };
 
-      const FLAG = (iso2) => \`https://flagcdn.com/\${iso2.toLowerCase()}.svg\`;
-      const AVATAR = (name) => \`https://api.dicebear.com/7.x/initials/svg?seed=\${encodeURIComponent(name)}&radius=50\`;
+      const FLAG = (iso2) => `https://flagcdn.com/${iso2.toLowerCase()}.svg`;
+      const AVATAR = (name) => `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}&radius=50`;
 
       const BASE_PLAYERS = [
         { id: "bellingham", name: "Jude Bellingham", nation: { name: "England", code: "GB" }, club: "Real Madrid", position: "CM", rating: 93 },
@@ -133,7 +133,7 @@
         { id: "gnabry", name: "Serge Gnabry", nation: { name: "Deutschland", code: "DE" }, club: "Bayern München", position: "RW", rating: 85 },
         { id: "messi", name: "Lionel Messi", nation: { name: "Argentinien", code: "AR" }, club: "Inter Miami", position: "RW", rating: 93 },
         { id: "cristiano", name: "Cristiano Ronaldo", nation: { name: "Portugal", code: "PT" }, club: "Al-Nassr", position: "ST", rating: 90 },
-        { id: "neymar", name: "Neymar Jr.", nation: { name: "Brasilien", code: "BR" }, club: "Al Hilal", position: "LW", rating: 89 },
+        { id: "neymar", name: "Neymar Jr.", nation: { name: "Brasilien", code: "BR" }, club: "Al Hilal", position: "LW", rating: 89 }
       ];
 
       function shuffle(arr){const a=[...arr];for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
@@ -151,8 +151,8 @@
 
       const Deck = ({ index, count, onDraw, disabled }) => (
         <button onClick={onDraw} disabled={disabled||count===0}
-          className={\`relative aspect-[3/4] rounded-2xl shadow-md border bg-gradient-to-br from-emerald-700 to-emerald-900 text-white flex items-center justify-center transition-transform active:scale-[0.98] \${disabled||count===0?"opacity-50 cursor-not-allowed":"hover:shadow-lg"}\`}
-          aria-label={\`Stapel \${index+1}\`}>
+          className={`relative aspect-[3/4] rounded-2xl shadow-md border bg-gradient-to-br from-emerald-700 to-emerald-900 text-white flex items-center justify-center transition-transform active:scale-[0.98] ${disabled||count===0?"opacity-50 cursor-not-allowed":"hover:shadow-lg"}`}
+          aria-label={`Stapel ${index+1}`}>
           <div className="absolute top-2 left-2 text-xs bg-white/15 px-2 py-0.5 rounded-full">Stapel {index+1}</div>
           <div className="text-center">
             <svg className="w-7 h-7 mx-auto mb-2" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 7h18M3 12h18M3 17h18"/></svg>
@@ -176,7 +176,7 @@
       const FieldSlot = ({ slot, player, onPlace, canPlace }) => (
         <div className="flex items-center justify-center">
           <button onClick={onPlace} disabled={!canPlace}
-            className={\`w-full max-w-[160px] h-[84px] rounded-xl border-2 flex items-center justify-center transition-all \${player?"bg-white/95 border-emerald-700 shadow":canPlace?"border-dashed border-emerald-400/80 hover:bg-emerald-800/30":"border-emerald-700/50"}\`}
+            className={`w-full max-w-[160px] h-[84px] rounded-xl border-2 flex items-center justify-center transition-all ${player?"bg-white/95 border-emerald-700 shadow":canPlace?"border-dashed border-emerald-400/80 hover:bg-emerald-800/30":"border-emerald-700/50"}`}
             aria-label={slot.label}>
             {player?(
               <div className="w-full px-2 flex items-center gap-2">
@@ -229,6 +229,31 @@
         );
       }
 
+      function shuffleDeck(arr){const a=[...arr];for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
+
+      function buildDecks(all,targetPerDeck=50){
+        const need=targetPerDeck*3;
+        let pool=[];
+        if(all.length>=need){ pool=shuffleDeck(all).slice(0,need); }
+        else{
+          const times=Math.ceil(need/all.length);
+          let counter=0;
+          const expanded=[];
+          for(let t=0;t<times;t++){
+            for(const p of shuffleDeck(all)){
+              if(expanded.length>=need) break;
+              const clone={...p,id:`${p.id}-${counter++}`};
+              expanded.push(clone);
+            }
+          }
+          pool=expanded.slice(0,need);
+        }
+        const d1=pool.slice(0,targetPerDeck);
+        const d2=pool.slice(targetPerDeck,targetPerDeck*2);
+        const d3=pool.slice(targetPerDeck*2,targetPerDeck*3);
+        return [d1,d2,d3];
+      }
+
       function App(){
         const [decks,setDecks]=useState(()=>buildDecks(BASE_PLAYERS));
         const [drawn,setDrawn]=useState(null);
@@ -237,6 +262,7 @@
         const [completed,setCompleted]=useState(false);
 
         useEffect(()=>{setCompleted(FORMATION_SLOTS.every(s=>lineup[s.id]!==null))},[lineup]);
+        const remainingSlots = useMemo(()=>FORMATION_SLOTS.filter(s=>!lineup[s.id]),[lineup]);
 
         function resetGame(){setDecks(buildDecks(BASE_PLAYERS));setDrawn(null);setPhase(null);setLineup({GK:null,LB:null,LCB:null,RCB:null,RB:null,LCM:null,CM:null,RCM:null,LW:null,ST:null,RW:null});}
         function drawFromDeck(i){
@@ -249,7 +275,7 @@
             copy[i]=deck;setDecks(copy);setDrawn(card);setPhase("nation");
           },100);
         }
-        function revealNext(){if(!drawn||!phase) return;if(phase==="nation") setPhase("club"); else if(phase==="club") setPhase("full");}
+        function revealNext(){if(!drawn||!phase) return;if(phase==="nation") setPhase("club"); else if(phase==="club") setPhase="full";}
         function placeOn(slot){if(!drawn||phase!=="full") return; if(lineup[slot]) return; setLineup({...lineup,[slot]:drawn}); setDrawn(null); setPhase(null);}
 
         return (
@@ -267,9 +293,26 @@
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-1 flex flex-col gap-4">
-                <SectionTitle icon={<span>🔀</span>} title="Stapel (verdeckt)" subtitle="Klicke einen Stapel an, um eine Karte zu ziehen." />
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span>🔀</span>
+                    <h2 className="font-semibold text-lg">Stapel (verdeckt)</h2>
+                  </div>
+                  <div className="text-sm text-slate-500">{completed? "Alle 11 Positionen sind besetzt – Team komplett!" : `Freie Plätze: ${remainingSlots.length}`}</div>
+                </div>
                 <div className="grid grid-cols-3 gap-3">
-                  {decks.map((d,i)=>(<Deck key={i} index={i} count={d.length} onDraw={()=>drawFromDeck(i)} disabled={!!drawn||completed}/>))}
+                  {decks.map((d,i)=>(
+                    <button key={i} onClick={()=>drawFromDeck(i)} disabled={!!drawn||completed}
+                      className={`relative aspect-[3/4] rounded-2xl shadow-md border bg-gradient-to-br from-emerald-700 to-emerald-900 text-white flex items-center justify-center transition-transform active:scale-[0.98] ${!!drawn||completed?"opacity-50 cursor-not-allowed":"hover:shadow-lg"}`}
+                      aria-label={`Stapel ${i+1}`}>
+                      <div className="absolute top-2 left-2 text-xs bg-white/15 px-2 py-0.5 rounded-full">Stapel {i+1}</div>
+                      <div className="text-center">
+                        <svg className="w-7 h-7 mx-auto mb-2" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 7h18M3 12h18M3 17h18"/></svg>
+                        <div className="text-sm">Karten übrig</div>
+                        <div className="text-2xl font-bold">{d.length}</div>
+                      </div>
+                    </button>
+                  ))}
                 </div>
 
                 <div className="card p-4 text-sm muted space-y-2">
@@ -278,7 +321,7 @@
                 </div>
 
                 {drawn && (
-                  <div className="card p-4">
+                  <div className="card p-4 mt-2">
                     <div className="flex items-center gap-4">
                       <div className="w-20 h-20 rounded-xl bg-slate-100 flex items-center justify-center overflow-hidden">
                         <img src={(drawn.photo)||AVATAR(drawn.name)} alt={drawn.name} className="w-full h-full object-cover"/>
@@ -286,7 +329,7 @@
                       <div className="flex-1 space-y-1">
                         <div className="flex items-center gap-2">
                           <span className="badge">🏳️ {drawn.nation.name}</span>
-                          {(phase==="club"||phase==="full") && (<ClubLogo club={drawn.club}/>)}
+                          {(phase==="club"||phase==="full") && (<span className="badge">🏟️ {drawn.club}</span>)}
                           {phase==="full" && (<span className="badge">🛡️ {drawn.rating}</span>)}
                         </div>
                         <div className="text-lg font-semibold">{phase==="full"?drawn.name:"???"}</div>
@@ -295,7 +338,7 @@
                         </div>
                       </div>
                       <div>
-                        {phase && phase!=="full" && (<button className="btn btn-emerald" onClick={revealNext}>Weiter</button>)}
+                        {phase && phase!=="full" && (<button className="btn btn-emerald" onClick={()=>setPhase(phase==="nation"?"club":"full")}>Weiter</button>)}
                         {phase==="full" && (<div className="text-sm muted">Wähle nun eine freie Position.</div>)}
                       </div>
                     </div>
@@ -304,12 +347,63 @@
               </div>
 
               <div className="lg:col-span-2">
-                <SectionTitle icon={<span>🟩</span>} title="Spielfeld" subtitle={completed? "Alle 11 Positionen sind besetzt – Team komplett!" : \`Freie Plätze: \${FORMATION_SLOTS.filter(s=>!lineup[s.id]).length}\`} />
-                <Pitch>
-                  {FORMATION_SLOTS.map(slot => (
-                    <FieldSlot key={slot.id} slot={slot} player={lineup[slot.id]} onPlace={()=>placeOn(slot.id)} canPlace={!!drawn && phase==="full" && !lineup[slot.id]} />
-                  ))}
-                </Pitch>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span>🟩</span>
+                    <h2 className="font-semibold text-lg">Spielfeld</h2>
+                  </div>
+                  <div className="text-sm text-slate-500">{completed? "Alle 11 Positionen sind besetzt – Team komplett!" : `Freie Plätze: ${remainingSlots.length}`}</div>
+                </div>
+                <div className="relative w-full aspect-[16/10] rounded-3xl bg-emerald-900/90 shadow-inner border overflow-hidden mt-2">
+                  <div className="absolute inset-0 grid grid-cols-3 grid-rows-4">
+                    {Array.from({length:12}).map((_,i)=>(<div key={i} className="border border-emerald-700/60"/>))}
+                  </div>
+                  <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-28 h-28 rounded-full border-2 border-emerald-600/70"></div>
+                  <div className="absolute inset-0 p-4 grid grid-cols-3 grid-rows-4 gap-3">
+                    <div className="col-span-3 grid grid-cols-3"><div/><div className="flex items-center justify-center"><div className="w-full max-w-[160px]"><div className="text-center text-emerald-200/60 text-[10px] uppercase tracking-wider">Torwart</div></div></div><div/></div>
+                    <div className="col-span-3 grid grid-cols-5 gap-3">
+                      <div className="flex items-center justify-center"><div className="text-center text-emerald-200/60 text-[10px] uppercase tracking-wider">Linksverteidiger</div></div>
+                      <div className="flex items-center justify-center"><div className="text-center text-emerald-200/60 text-[10px] uppercase tracking-wider">Innenverteidiger (links)</div></div>
+                      <div/>
+                      <div className="flex items-center justify-center"><div className="text-center text-emerald-200/60 text-[10px] uppercase tracking-wider">Innenverteidiger (rechts)</div></div>
+                      <div className="flex items-center justify-center"><div className="text-center text-emerald-200/60 text-[10px] uppercase tracking-wider">Rechtsverteidiger</div></div>
+                    </div>
+                    <div className="col-span-3 grid grid-cols-3 gap-3">
+                      <div className="flex items-center justify-center"><div className="text-center text-emerald-200/60 text-[10px] uppercase tracking-wider">Zentrales Mittelfeld (links)</div></div>
+                      <div className="flex items-center justify-center"><div className="text-center text-emerald-200/60 text-[10px] uppercase tracking-wider">Zentrales Mittelfeld</div></div>
+                      <div className="flex items-center justify-center"><div className="text-center text-emerald-200/60 text-[10px] uppercase tracking-wider">Zentrales Mittelfeld (rechts)</div></div>
+                    </div>
+                    <div className="col-span-3 grid grid-cols-3 gap-3">
+                      <div className="flex items-center justify-center"><div className="text-center text-emerald-200/60 text-[10px] uppercase tracking-wider">Linksaußen</div></div>
+                      <div className="flex items-center justify-center"><div className="text-center text-emerald-200/60 text-[10px] uppercase tracking-wider">Stürmer</div></div>
+                      <div className="flex items-center justify-center"><div className="text-center text-emerald-200/60 text-[10px] uppercase tracking-wider">Rechtsaußen</div></div>
+                    </div>
+                  </div>
+                  <div className="absolute inset-0 p-4 grid grid-cols-3 grid-rows-4 gap-3">
+                    {FORMATION_SLOTS.map(slot => (
+                      <div key={slot.id} className="flex items-center justify-center">
+                        <button onClick={()=>placeOn(slot.id)} disabled={!drawn || phase!=="full" || lineup[slot.id]}
+                          className={`w-full max-w-[160px] h-[84px] rounded-xl border-2 flex items-center justify-center transition-all ${lineup[slot.id]?"bg-white/95 border-emerald-700 shadow":(!drawn||phase!=="full"||lineup[slot.id])?"border-emerald-700/50":"border-dashed border-emerald-400/80 hover:bg-emerald-800/30"}`}>
+                          {lineup[slot.id]? (
+                            <div className="w-full px-2 flex items-center gap-2">
+                              <img src={(lineup[slot.id].photo)||AVATAR(lineup[slot.id].name)} alt={lineup[slot.id].name} className="w-10 h-10 rounded-lg object-cover"/>
+                              <div className="text-left">
+                                <div className="text-xs font-semibold leading-tight">{lineup[slot.id].name}</div>
+                                <div className="text-[10px] text-slate-500 leading-tight flex items-center gap-1">
+                                  <img src={FLAG(lineup[slot.id].nation.code)} alt={lineup[slot.id].nation.name} className="w-3 h-3 rounded-sm"/>
+                                  <span>{lineup[slot.id].club}</span>
+                                </div>
+                                <div className="text-[10px] text-emerald-700 font-medium">{lineup[slot.id].position} • {lineup[slot.id].rating}</div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="text-[10px] text-emerald-100/80 uppercase tracking-wider text-center px-2">{slot.label}{(drawn && phase==="full" && !lineup[slot.id])?" – Klicken zum Setzen":""}</div>
+                          )}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
 
