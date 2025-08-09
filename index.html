@@ -1,0 +1,511 @@
+import React, { useMemo, useState, useEffect } from "react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Shuffle, Users, LayoutGrid, Info, RotateCcw, Football, Timer, Shield, Flag, Image as ImageIcon } from "lucide-react";
+
+// ------------------------------------------------------------
+// Fussballtrainer – Single-file React app
+// - 3 verdeckte Stapel (Decks)
+// - Jede Karte: echter Spieler mit Nationalität, Club, Position, Rating
+// - Ziehen -> Reveal in 3 Schritten: Nation -> Club -> Full Stats
+// - Spieler auf 11 Positionen setzen (fix, nicht verschiebbar)
+// - Clean UI mit Tailwind + shadcn/ui
+// ------------------------------------------------------------
+
+// \u26a0\ufe0f Hinweis zu Daten:
+// Diese Version enthält eine startklare, kuratierte Spielerliste (ca. 60+) aus realen Teams (Stand grob 2024/25).
+// Sie können die Liste unten jederzeit erweitern (Ziel: 150 eindeutige Spieler / 3 Decks \u00d7 50).
+// Bilder: Standardmäßig generieren wir Avatare per Dicebear (keine Rechte-Probleme). Flags via flagcdn.com.
+
+// Positionsschema (4-3-3):
+const FORMATION_SLOTS = [
+  { id: "GK", label: "Torwart" },
+  { id: "LB", label: "Linksverteidiger" },
+  { id: "LCB", label: "Innenverteidiger (links)" },
+  { id: "RCB", label: "Innenverteidiger (rechts)" },
+  { id: "RB", label: "Rechtsverteidiger" },
+  { id: "LCM", label: "Zentrales Mittelfeld (links)" },
+  { id: "CM", label: "Zentrales Mittelfeld" },
+  { id: "RCM", label: "Zentrales Mittelfeld (rechts)" },
+  { id: "LW", label: "Linksaußen" },
+  { id: "ST", label: "Stürmer" },
+  { id: "RW", label: "Rechtsaußen" },
+] as const;
+
+export type SlotId = typeof FORMATION_SLOTS[number]["id"];
+
+// Minimales Club-Logo-Mapping (optional): Fallback auf Text, falls Logo nicht geladen wird.
+const CLUB_LOGOS: Record<string, string> = {
+  "Real Madrid": "https://upload.wikimedia.org/wikipedia/en/5/56/Real_Madrid_CF.svg",
+  "FC Barcelona": "https://upload.wikimedia.org/wikipedia/en/4/47/FC_Barcelona_%28crest%29.svg",
+  "Manchester City": "https://upload.wikimedia.org/wikipedia/en/e/eb/Manchester_City_FC_badge.svg",
+  "Liverpool": "https://upload.wikimedia.org/wikipedia/en/0/0c/Liverpool_FC.svg",
+  "Arsenal": "https://upload.wikimedia.org/wikipedia/en/5/53/Arsenal_FC.svg",
+  "Manchester United": "https://upload.wikimedia.org/wikipedia/en/7/7a/Manchester_United_FC_crest.svg",
+  "Bayern München": "https://upload.wikimedia.org/wikipedia/en/1/1f/FC_Bayern_M%C3%BCnchen_logo_%282017%29.svg",
+  "Borussia Dortmund": "https://upload.wikimedia.org/wikipedia/commons/6/67/Borussia_Dortmund_logo.svg",
+  "Paris Saint-Germain": "https://upload.wikimedia.org/wikipedia/en/a/a7/Paris_Saint-Germain_F.C..svg",
+  "Juventus": "https://upload.wikimedia.org/wikipedia/commons/1/15/Juventus_FC_2017_logo.svg",
+  "Inter": "https://upload.wikimedia.org/wikipedia/commons/0/05/Logo_of_Inter_Milan_2021.svg",
+  "AC Milan": "https://upload.wikimedia.org/wikipedia/commons/d/d0/Logo_of_AC_Milan.svg",
+  "Atletico Madrid": "https://upload.wikimedia.org/wikipedia/en/f/f4/Atletico_Madrid_2017_logo.svg",
+  "RB Leipzig": "https://upload.wikimedia.org/wikipedia/en/0/04/RB_Leipzig_2014_logo.svg",
+  "Leverkusen": "https://upload.wikimedia.org/wikipedia/en/5/59/Bayer_Leverkusen_logo.svg",
+  "Tottenham": "https://upload.wikimedia.org/wikipedia/en/b/b4/Tottenham_Hotspur.svg",
+  "Chelsea": "https://upload.wikimedia.org/wikipedia/en/c/cc/Chelsea_FC.svg",
+  "Newcastle": "https://upload.wikimedia.org/wikipedia/en/5/56/Newcastle_United_Logo.svg",
+  "Aston Villa": "https://upload.wikimedia.org/wikipedia/en/f/f9/Aston_Villa_FC_crest_%282016%29.svg",
+  "Roma": "https://upload.wikimedia.org/wikipedia/en/f/f7/AS_Roma_logo_%282017%29.svg",
+  "Napoli": "https://upload.wikimedia.org/wikipedia/commons/2/2d/SSC_Neapel.svg",
+  "Benfica": "https://upload.wikimedia.org/wikipedia/en/a/a2/SL_Benfica_logo.svg",
+  "Sporting CP": "https://upload.wikimedia.org/wikipedia/en/9/90/Sporting_Clube_de_Portugal.png",
+  "Porto": "https://upload.wikimedia.org/wikipedia/en/f/f1/FC_Porto.svg",
+};
+
+// Länderflaggen (ISO2 -> Flag URL)
+const FLAG = (iso2: string) => `https://flagcdn.com/${iso2.toLowerCase()}.svg`;
+
+// Foto/Avatar (lizenzfrei via Dicebear)
+const AVATAR = (name: string) =>
+  `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}&radius=50`;
+
+export type Player = {
+  id: string; // unique
+  name: string;
+  nation: { name: string; code: string }; // code = ISO2 (z.B. DE, FR, BR)
+  club: string; // aktueller Club (ca. 2024/25)
+  position: SlotId; // bevorzugte Position (für Flair, nicht zwingend)
+  rating: number; // 1-100
+  photo?: string; // optional
+};
+
+// ---- Spielerbasis (kuratiert; kann erweitert werden) ----------------------
+const BASE_PLAYERS: Player[] = [
+  // Spanien / La Liga (Real/Barça/Atleti)
+  { id: "bellingham", name: "Jude Bellingham", nation: { name: "England", code: "GB" }, club: "Real Madrid", position: "CM", rating: 93 },
+  { id: "vinicius", name: "Vinícius Júnior", nation: { name: "Brasilien", code: "BR" }, club: "Real Madrid", position: "LW", rating: 92 },
+  { id: "courtois", name: "Thibaut Courtois", nation: { name: "Belgien", code: "BE" }, club: "Real Madrid", position: "GK", rating: 90 },
+  { id: "aru", name: "Aurélien Tchouaméni", nation: { name: "Frankreich", code: "FR" }, club: "Real Madrid", position: "CM", rating: 89 },
+  { id: "rodrygo", name: "Rodrygo", nation: { name: "Brasilien", code: "BR" }, club: "Real Madrid", position: "RW", rating: 89 },
+  { id: "terstegen", name: "Marc-André ter Stegen", nation: { name: "Deutschland", code: "DE" }, club: "FC Barcelona", position: "GK", rating: 89 },
+  { id: "pedri", name: "Pedri", nation: { name: "Spanien", code: "ES" }, club: "FC Barcelona", position: "CM", rating: 89 },
+  { id: "raphinha", name: "Raphinha", nation: { name: "Brasilien", code: "BR" }, club: "FC Barcelona", position: "RW", rating: 86 },
+  { id: "lewandowski", name: "Robert Lewandowski", nation: { name: "Polen", code: "PL" }, club: "FC Barcelona", position: "ST", rating: 90 },
+  { id: "griezmann", name: "Antoine Griezmann", nation: { name: "Frankreich", code: "FR" }, club: "Atletico Madrid", position: "ST", rating: 89 },
+
+  // Premier League (City, Arsenal, Liverpool, ManU, Spurs, Chelsea)
+  { id: "haaland", name: "Erling Haaland", nation: { name: "Norwegen", code: "NO" }, club: "Manchester City", position: "ST", rating: 94 },
+  { id: "kdb", name: "Kevin De Bruyne", nation: { name: "Belgien", code: "BE" }, club: "Manchester City", position: "CM", rating: 92 },
+  { id: "foden", name: "Phil Foden", nation: { name: "England", code: "GB" }, club: "Manchester City", position: "RW", rating: 90 },
+  { id: "odegaard", name: "Martin Ødegaard", nation: { name: "Norwegen", code: "NO" }, club: "Arsenal", position: "CM", rating: 89 },
+  { id: "saka", name: "Bukayo Saka", nation: { name: "England", code: "GB" }, club: "Arsenal", position: "RW", rating: 89 },
+  { id: "alisson", name: "Alisson Becker", nation: { name: "Brasilien", code: "BR" }, club: "Liverpool", position: "GK", rating: 90 },
+  { id: "vdijk", name: "Virgil van Dijk", nation: { name: "Niederlande", code: "NL" }, club: "Liverpool", position: "RCB", rating: 90 },
+  { id: "saliba", name: "William Saliba", nation: { name: "Frankreich", code: "FR" }, club: "Arsenal", position: "RCB", rating: 88 },
+  { id: "rashford", name: "Marcus Rashford", nation: { name: "England", code: "GB" }, club: "Manchester United", position: "LW", rating: 86 },
+  { id: "bruno", name: "Bruno Fernandes", nation: { name: "Portugal", code: "PT" }, club: "Manchester United", position: "CM", rating: 88 },
+  { id: "son", name: "Heung-min Son", nation: { name: "Südkorea", code: "KR" }, club: "Tottenham", position: "LW", rating: 88 },
+  { id: "madison", name: "James Maddison", nation: { name: "England", code: "GB" }, club: "Tottenham", position: "CM", rating: 86 },
+  { id: "sterling", name: "Raheem Sterling", nation: { name: "England", code: "GB" }, club: "Chelsea", position: "LW", rating: 84 },
+  { id: "palmer", name: "Cole Palmer", nation: { name: "England", code: "GB" }, club: "Chelsea", position: "RW", rating: 86 },
+  { id: "isak", name: "Alexander Isak", nation: { name: "Schweden", code: "SE" }, club: "Newcastle", position: "ST", rating: 86 },
+  { id: "martinez", name: "Emiliano Martínez", nation: { name: "Argentinien", code: "AR" }, club: "Aston Villa", position: "GK", rating: 86 },
+
+  // Bundesliga
+  { id: "kane", name: "Harry Kane", nation: { name: "England", code: "GB" }, club: "Bayern München", position: "ST", rating: 92 },
+  { id: "musiala", name: "Jamal Musiala", nation: { name: "Deutschland", code: "DE" }, club: "Bayern München", position: "LCM", rating: 90 },
+  { id: "kim", name: "Kim Min-jae", nation: { name: "Südkorea", code: "KR" }, club: "Bayern München", position: "RCB", rating: 86 },
+  { id: "wirtz", name: "Florian Wirtz", nation: { name: "Deutschland", code: "DE" }, club: "Leverkusen", position: "CM", rating: 90 },
+  { id: "xhaka", name: "Granit Xhaka", nation: { name: "Schweiz", code: "CH" }, club: "Leverkusen", position: "CM", rating: 86 },
+  { id: "brandt", name: "Julian Brandt", nation: { name: "Deutschland", code: "DE" }, club: "Borussia Dortmund", position: "CM", rating: 85 },
+  { id: "reus", name: "Marco Reus", nation: { name: "Deutschland", code: "DE" }, club: "Borussia Dortmund", position: "LW", rating: 83 },
+  { id: "olmo", name: "Dani Olmo", nation: { name: "Spanien", code: "ES" }, club: "RB Leipzig", position: "LCM", rating: 86 },
+
+  // Serie A
+  { id: "lautaro", name: "Lautaro Martínez", nation: { name: "Argentinien", code: "AR" }, club: "Inter", position: "ST", rating: 90 },
+  { id: "barella", name: "Nicolò Barella", nation: { name: "Italien", code: "IT" }, club: "Inter", position: "CM", rating: 88 },
+  { id: "theo", name: "Theo Hernández", nation: { name: "Frankreich", code: "FR" }, club: "AC Milan", position: "LB", rating: 88 },
+  { id: "leao", name: "Rafael Leão", nation: { name: "Portugal", code: "PT" }, club: "AC Milan", position: "LW", rating: 88 },
+  { id: "osimhen", name: "Victor Osimhen", nation: { name: "Nigeria", code: "NG" }, club: "Napoli", position: "ST", rating: 89 },
+  { id: "kvara", name: "Khvicha Kvaratskhelia", nation: { name: "Georgien", code: "GE" }, club: "Napoli", position: "LW", rating: 88 },
+  { id: "chiesa", name: "Federico Chiesa", nation: { name: "Italien", code: "IT" }, club: "Juventus", position: "RW", rating: 86 },
+  { id: "bremer", name: "Bremer", nation: { name: "Brasilien", code: "BR" }, club: "Juventus", position: "RCB", rating: 85 },
+
+  // Ligue 1 / PSG
+  { id: "mbappe", name: "Kylian Mbappé", nation: { name: "Frankreich", code: "FR" }, club: "Real Madrid", position: "LW", rating: 95 },
+  { id: "dembele", name: "Ousmane Dembélé", nation: { name: "Frankreich", code: "FR" }, club: "Paris Saint-Germain", position: "RW", rating: 88 },
+  { id: "marquinhos", name: "Marquinhos", nation: { name: "Brasilien", code: "BR" }, club: "Paris Saint-Germain", position: "RCB", rating: 88 },
+  { id: "donarumma", name: "Gianluigi Donnarumma", nation: { name: "Italien", code: "IT" }, club: "Paris Saint-Germain", position: "GK", rating: 89 },
+
+  // Portugal
+  { id: "diMaria", name: "Ángel Di María", nation: { name: "Argentinien", code: "AR" }, club: "Benfica", position: "RW", rating: 84 },
+  { id: "silva", name: "Bernardo Silva", nation: { name: "Portugal", code: "PT" }, club: "Manchester City", position: "RCM", rating: 89 },
+  { id: "brunoF", name: "Bruno Fernandes", nation: { name: "Portugal", code: "PT" }, club: "Manchester United", position: "CM", rating: 88 },
+
+  // Weitere bekannte Namen
+  { id: "modric", name: "Luka Modrić", nation: { name: "Kroatien", code: "HR" }, club: "Real Madrid", position: "CM", rating: 88 },
+  { id: "kroos", name: "Toni Kroos", nation: { name: "Deutschland", code: "DE" }, club: "Real Madrid", position: "CM", rating: 87 },
+  { id: "gundogan", name: "İlkay Gündoğan", nation: { name: "Deutschland", code: "DE" }, club: "FC Barcelona", position: "CM", rating: 86 },
+  { id: "neuer", name: "Manuel Neuer", nation: { name: "Deutschland", code: "DE" }, club: "Bayern München", position: "GK", rating: 87 },
+  { id: "alaba", name: "David Alaba", nation: { name: "Österreich", code: "AT" }, club: "Real Madrid", position: "LCB", rating: 86 },
+  { id: "rudiger", name: "Antonio Rüdiger", nation: { name: "Deutschland", code: "DE" }, club: "Real Madrid", position: "RCB", rating: 88 },
+  { id: "davies", name: "Alphonso Davies", nation: { name: "Kanada", code: "CA" }, club: "Bayern München", position: "LB", rating: 87 },
+  { id: "kante", name: "N’Golo Kanté", nation: { name: "Frankreich", code: "FR" }, club: "Al-Ittihad", position: "CM", rating: 86 },
+  { id: "modibo", name: "Dayot Upamecano", nation: { name: "Frankreich", code: "FR" }, club: "Bayern München", position: "RCB", rating: 86 },
+  { id: "sane", name: "Leroy Sané", nation: { name: "Deutschland", code: "DE" }, club: "Bayern München", position: "RW", rating: 87 },
+  { id: "gnabry", name: "Serge Gnabry", nation: { name: "Deutschland", code: "DE" }, club: "Bayern München", position: "RW", rating: 85 },
+  { id: "messi", name: "Lionel Messi", nation: { name: "Argentinien", code: "AR" }, club: "Inter Miami", position: "RW", rating: 93 },
+  { id: "cristiano", name: "Cristiano Ronaldo", nation: { name: "Portugal", code: "PT" }, club: "Al-Nassr", position: "ST", rating: 90 },
+  { id: "neymar", name: "Neymar Jr.", nation: { name: "Brasilien", code: "BR" }, club: "Al Hilal", position: "LW", rating: 89 },
+];
+
+// Utility: sichere Kopie + Shuffle
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// Baue 3 Decks aus einzigartigen Spielern. Wenn die Basis weniger als 150 hat, verteilen wir gleichmäßig
+// und erlauben Duplikate über Deck-Grenzen hinweg nicht (global unique).
+function buildDecks(all: Player[], targetPerDeck = 50) {
+  // Für MVP: wenn zu wenige Spieler vorhanden, wiederhole zufällig (mit Suffix-ID), ABER Name bleibt real.
+  const need = targetPerDeck * 3;
+  let pool: Player[] = [];
+  if (all.length >= need) {
+    pool = shuffle(all).slice(0, need);
+  } else {
+    const times = Math.ceil(need / all.length);
+    let counter = 0;
+    const expanded: Player[] = [];
+    for (let t = 0; t < times; t++) {
+      for (const p of shuffle(all)) {
+        if (expanded.length >= need) break;
+        const clone: Player = { ...p, id: `${p.id}-${counter++}` };
+        expanded.push(clone);
+      }
+    }
+    pool = expanded.slice(0, need);
+  }
+  const d1 = pool.slice(0, targetPerDeck);
+  const d2 = pool.slice(targetPerDeck, targetPerDeck * 2);
+  const d3 = pool.slice(targetPerDeck * 2, targetPerDeck * 3);
+  return [d1, d2, d3];
+}
+
+// Reveal-Phasen
+type RevealPhase = "nation" | "club" | "full";
+
+export default function FussballtrainerApp() {
+  const [decks, setDecks] = useState<Player[][]>(() => buildDecks(BASE_PLAYERS));
+  const [drawn, setDrawn] = useState<Player | null>(null);
+  const [phase, setPhase] = useState<RevealPhase | null>(null);
+  const [lineup, setLineup] = useState<Record<SlotId, Player | null>>(() => {
+    const init: Record<SlotId, Player | null> = {
+      GK: null, LB: null, LCB: null, RCB: null, RB: null,
+      LCM: null, CM: null, RCM: null, LW: null, ST: null, RW: null,
+    };
+    return init;
+  });
+  const [completed, setCompleted] = useState(false);
+
+  useEffect(() => {
+    const filled = FORMATION_SLOTS.every(s => lineup[s.id] !== null);
+    setCompleted(filled);
+  }, [lineup]);
+
+  const remainingSlots = useMemo(() => FORMATION_SLOTS.filter(s => !lineup[s.id]), [lineup]);
+
+  function resetGame() {
+    setDecks(buildDecks(BASE_PLAYERS));
+    setDrawn(null);
+    setPhase(null);
+    setLineup({ GK: null, LB: null, LCB: null, RCB: null, RB: null, LCM: null, CM: null, RCM: null, LW: null, ST: null, RW: null });
+  }
+
+  function drawFromDeck(i: number) {
+    if (completed) return;
+    if (drawn) return; // erst platzieren
+    setPhase(null);
+    setTimeout(() => {
+      const deckCopy = decks.map(d => [...d]);
+      const deck = deckCopy[i];
+      if (deck.length === 0) return;
+      const idx = Math.floor(Math.random() * deck.length);
+      const card = deck.splice(idx, 1)[0];
+      deckCopy[i] = deck;
+      setDecks(deckCopy);
+      setDrawn(card);
+      setPhase("nation");
+    }, 100);
+  }
+
+  function revealNext() {
+    if (!drawn || !phase) return;
+    if (phase === "nation") setPhase("club");
+    else if (phase === "club") setPhase("full");
+  }
+
+  function placeOn(slot: SlotId) {
+    if (!drawn || phase !== "full") return;
+    if (lineup[slot]) return; // schon belegt
+    setLineup({ ...lineup, [slot]: drawn });
+    setDrawn(null);
+    setPhase(null);
+  }
+
+  return (
+    <div className="min-h-screen w-full bg-gradient-to-br from-emerald-50 via-emerald-100 to-emerald-200 p-4 md:p-8">
+      <div className="max-w-6xl mx-auto">
+        <header className="flex items-center justify-between gap-4 mb-6">
+          <div className="flex items-center gap-3">
+            <Football className="w-7 h-7" />
+            <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Fussballtrainer – 11er-Aufstellung</h1>
+            <Badge className="bg-emerald-700">v1</Badge>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" onClick={resetGame} className="gap-2"><RotateCcw className="w-4 h-4"/>Neu starten</Button>
+          </div>
+        </header>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Linke Spalte: Decks */}
+          <div className="lg:col-span-1 flex flex-col gap-4">
+            <SectionTitle icon={<Shuffle className="w-5 h-5"/>} title="Stapel (verdeckt)" subtitle="Klicke einen Stapel an, um eine Karte zu ziehen." />
+
+            <div className="grid grid-cols-3 gap-3">
+              {decks.map((d, i) => (
+                <Deck key={i} index={i} count={d.length} onDraw={() => drawFromDeck(i)} disabled={!!drawn || completed} />
+              ))}
+            </div>
+
+            <Card>
+              <CardContent className="p-4 text-sm text-muted-foreground space-y-2">
+                <p className="flex items-center gap-2"><Info className="w-4 h-4"/> Jede Karte zeigt erst Nationalität, dann Club, dann alle Daten. Danach kannst du sie auf eine freie Position setzen.</p>
+                <p className="flex items-center gap-2"><Timer className="w-4 h-4"/> Solange eine Position besetzt ist, bleibt sie fix und kann nicht verschoben werden.</p>
+              </CardContent>
+            </Card>
+
+            {drawn && (
+              <RevealCard player={drawn} phase={phase} onNext={revealNext} />
+            )}
+          </div>
+
+          {/* Mittlere + rechte Spalte: Spielfeld */}
+          <div className="lg:col-span-2">
+            <SectionTitle icon={<LayoutGrid className="w-5 h-5"/>} title="Spielfeld" subtitle={completed ? "Alle 11 Positionen sind besetzt – Team komplett!" : `Freie Plätze: ${remainingSlots.length}`} />
+
+            <Pitch>
+              {FORMATION_SLOTS.map((slot) => (
+                <FieldSlot
+                  key={slot.id}
+                  slot={slot}
+                  player={lineup[slot.id]}
+                  onPlace={() => placeOn(slot.id)}
+                  canPlace={!!drawn && phase === "full" && !lineup[slot.id]}
+                />
+              ))}
+            </Pitch>
+          </div>
+        </div>
+
+        <footer className="mt-8 text-xs text-muted-foreground">
+          <p>
+            Datenhinweis: Clubs/Nationalitäten grob Saison 2024/25; Fotos sind generierte Avatare. Logos/Flaggen: Wikipedia Commons / FlagCDN (je nach Verfügbarkeit).
+          </p>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+function SectionTitle({ icon, title, subtitle }: { icon: React.ReactNode; title: string; subtitle?: string }) {
+  return (
+    <div className="flex items-center justify-between">
+      <div className="flex items-center gap-2">
+        {icon}
+        <h2 className="font-semibold text-lg">{title}</h2>
+      </div>
+      {subtitle && <div className="text-sm text-muted-foreground">{subtitle}</div>}
+    </div>
+  );
+}
+
+function Deck({ index, count, onDraw, disabled }: { index: number; count: number; onDraw: () => void; disabled?: boolean }) {
+  return (
+    <button
+      onClick={onDraw}
+      disabled={disabled || count === 0}
+      className={`relative aspect-[3/4] rounded-2xl shadow-md border bg-gradient-to-br from-emerald-700 to-emerald-900 text-white flex items-center justify-center transition-transform active:scale-[0.98] ${disabled || count===0 ? "opacity-50 cursor-not-allowed" : "hover:shadow-lg"}`}
+      aria-label={`Stapel ${index + 1}`}
+    >
+      <div className="absolute top-2 left-2 text-xs bg-white/15 px-2 py-0.5 rounded-full">Stapel {index + 1}</div>
+      <div className="text-center">
+        <Users className="w-7 h-7 mx-auto mb-2"/>
+        <div className="text-sm">Karten übrig</div>
+        <div className="text-2xl font-bold">{count}</div>
+      </div>
+    </button>
+  );
+}
+
+function RevealCard({ player, phase, onNext }: { player: Player; phase: RevealPhase | null; onNext: () => void }) {
+  return (
+    <Card className="mt-4">
+      <CardContent className="p-4">
+        <div className="flex items-center gap-4">
+          <div className="w-20 h-20 rounded-xl bg-muted flex items-center justify-center overflow-hidden">
+            {/* Foto/Avatar */}
+            <img src={player.photo || AVATAR(player.name)} alt={player.name} className="w-full h-full object-cover" onError={(e)=>{(e.target as HTMLImageElement).style.display='none'}}/>
+          </div>
+          <div className="flex-1 space-y-1">
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary" className="gap-1"><Flag className="w-3 h-3"/> {player.nation.name}</Badge>
+              {phase === "club" || phase === "full" ? (
+                <div className="flex items-center gap-2">
+                  <ClubLogo club={player.club} />
+                </div>
+              ) : null}
+              {phase === "full" && (
+                <Badge className="gap-1"><Shield className="w-3 h-3"/> {player.rating}</Badge>
+              )}
+            </div>
+            <div className="text-lg font-semibold">
+              {phase === "full" ? player.name : "???"}
+            </div>
+            <div className="text-sm text-muted-foreground">
+              {phase === "full" ? `${player.club} • ${prettySlot(player.position)}` : phase === "club" ? player.club : player.nation.name}
+            </div>
+          </div>
+          <div>
+            {phase && phase !== "full" && (
+              <Button onClick={onNext} className="gap-2"><Info className="w-4 h-4"/> Weiter</Button>
+            )}
+            {phase === "full" && (
+              <div className="text-sm text-muted-foreground">Wähle nun eine freie Position auf dem Feld.</div>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ClubLogo({ club }: { club: string }) {
+  const logo = CLUB_LOGOS[club];
+  if (!logo) return <Badge variant="outline" className="gap-1"><ImageIcon className="w-3 h-3"/> {club}</Badge>;
+  return (
+    <div className="flex items-center gap-2">
+      <img src={logo} alt={club} className="w-6 h-6" onError={(e)=>{(e.target as HTMLImageElement).style.display='none'}}/>
+      <span className="text-sm">{club}</span>
+    </div>
+  );
+}
+
+function Pitch({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="relative w-full aspect-[16/10] rounded-3xl bg-emerald-900/90 shadow-inner border overflow-hidden">
+      {/* Linien */}
+      <div className="absolute inset-0 grid grid-cols-3 grid-rows-4">
+        {Array.from({ length: 12 }).map((_, i) => (
+          <div key={i} className="border border-emerald-700/60" />
+        ))}
+      </div>
+      {/* Mittelkreis */}
+      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-28 h-28 rounded-full border-2 border-emerald-600/70" />
+      {/* Kinder */}
+      <div className="absolute inset-0 p-4 grid grid-cols-3 grid-rows-4 gap-3">
+        {/* Zeilen: GK | Abwehr | Mittelfeld | Sturm */}
+        <div className="col-span-3 grid grid-cols-3">
+          <div />
+          <div className="flex items-center justify-center"><div className="w-full max-w-[160px]"><SlotPlaceholder id="GK"/></div></div>
+          <div />
+        </div>
+        <div className="col-span-3 grid grid-cols-5 gap-3">
+          <div className="flex items-center justify-center"><SlotPlaceholder id="LB"/></div>
+          <div className="flex items-center justify-center"><SlotPlaceholder id="LCB"/></div>
+          <div />
+          <div className="flex items-center justify-center"><SlotPlaceholder id="RCB"/></div>
+          <div className="flex items-center justify-center"><SlotPlaceholder id="RB"/></div>
+        </div>
+        <div className="col-span-3 grid grid-cols-3 gap-3">
+          <div className="flex items-center justify-center"><SlotPlaceholder id="LCM"/></div>
+          <div className="flex items-center justify-center"><SlotPlaceholder id="CM"/></div>
+          <div className="flex items-center justify-center"><SlotPlaceholder id="RCM"/></div>
+        </div>
+        <div className="col-span-3 grid grid-cols-3 gap-3">
+          <div className="flex items-center justify-center"><SlotPlaceholder id="LW"/></div>
+          <div className="flex items-center justify-center"><SlotPlaceholder id="ST"/></div>
+          <div className="flex items-center justify-center"><SlotPlaceholder id="RW"/></div>
+        </div>
+      </div>
+      {/* Children rendern on top (Slots selbst sind absolut platziert) */}
+      <div className="absolute inset-0 p-4 grid grid-cols-3 grid-rows-4 gap-3">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function SlotPlaceholder({ id }: { id: SlotId }) {
+  const slot = FORMATION_SLOTS.find(s => s.id === id)!;
+  return (
+    <div className="text-center text-emerald-200/60 text-[10px] uppercase tracking-wider">{slot.label}</div>
+  );
+}
+
+function FieldSlot({ slot, player, onPlace, canPlace }: {
+  slot: { id: SlotId; label: string };
+  player: Player | null;
+  onPlace: () => void;
+  canPlace: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-center">
+      <button
+        onClick={onPlace}
+        disabled={!canPlace}
+        className={`w-full max-w-[160px] h-[84px] rounded-xl border-2 flex items-center justify-center transition-all ${
+          player ? "bg-white/95 border-emerald-700 shadow" : canPlace ? "border-dashed border-emerald-400/80 hover:bg-emerald-800/30" : "border-emerald-700/50"
+        }`}
+        aria-label={slot.label}
+      >
+        {player ? (
+          <div className="w-full px-2 flex items-center gap-2">
+            <img src={player.photo || AVATAR(player.name)} alt={player.name} className="w-10 h-10 rounded-lg object-cover" onError={(e)=>{(e.target as HTMLImageElement).style.display='none'}}/>
+            <div className="text-left">
+              <div className="text-xs font-semibold leading-tight">{player.name}</div>
+              <div className="text-[10px] text-muted-foreground leading-tight flex items-center gap-1">
+                <img src={FLAG(player.nation.code)} alt={player.nation.name} className="w-3 h-3 rounded-sm" onError={(e)=>{(e.target as HTMLImageElement).style.display='none'}}/>
+                <span>{player.club}</span>
+              </div>
+              <div className="text-[10px] text-emerald-700 font-medium">{prettySlot(player.position)} • {player.rating}</div>
+            </div>
+          </div>
+        ) : (
+          <div className="text-[10px] text-emerald-100/80 uppercase tracking-wider text-center px-2">{slot.label}{canPlace ? " – Klicken zum Setzen" : ""}</div>
+        )}
+      </button>
+    </div>
+  );
+}
+
+function prettySlot(id: SlotId) {
+  switch (id) {
+    case "GK": return "Torwart";
+    case "LB": return "Linksverteidiger";
+    case "LCB": return "Innenverteidiger (L)";
+    case "RCB": return "Innenverteidiger (R)";
+    case "RB": return "Rechtsverteidiger";
+    case "LCM": return "Zentrales MF (L)";
+    case "CM": return "Zentrales MF";
+    case "RCM": return "Zentrales MF (R)";
+    case "LW": return "Linksaußen";
+    case "ST": return "Stürmer";
+    case "RW": return "Rechtsaußen";
+  }
+}
