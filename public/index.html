@@ -14,12 +14,16 @@
       .badge{display:inline-flex;align-items:center;gap:.25rem;border:1px solid rgba(0,0,0,.08);border-radius:9999px;padding:.125rem .5rem;font-size:.75rem;font-weight:600}
       .muted{color:#64748b}
     </style>
+    <!-- React UMD -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- Babel for JSX transpilation in the browser -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   </head>
   <body class="min-h-screen bg-gradient-to-br from-emerald-50 via-emerald-100 to-emerald-200">
     <div id="root" class="p-4 md:p-8"></div>
-    <script>
+
+    <script type="text/babel">
       const { useState, useEffect, useMemo } = React;
 
       const FORMATION_SLOTS = [
@@ -233,7 +237,6 @@
         const [completed,setCompleted]=useState(false);
 
         useEffect(()=>{setCompleted(FORMATION_SLOTS.every(s=>lineup[s.id]!==null))},[lineup]);
-        const remainingSlots=useMemo(()=>FORMATION_SLOTS.filter(s=>!lineup[s.id]),[lineup]);
 
         function resetGame(){setDecks(buildDecks(BASE_PLAYERS));setDrawn(null);setPhase(null);setLineup({GK:null,LB:null,LCB:null,RCB:null,RB:null,LCM:null,CM:null,RCM:null,LW:null,ST:null,RW:null});}
         function drawFromDeck(i){
@@ -317,7 +320,7 @@
         );
       }
 
-      ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+      ReactDOM.createRoot(document.getElementById('root')).render(<App />);
     </script>
   </body>
 </html>
